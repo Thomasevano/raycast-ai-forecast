@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.rayext
+raycast-env.d.ts
+__pycache__/
+*.pyc
+.DS_Store
+.env*
+*.log
+state.json
+state.lock
