@@ -3,7 +3,6 @@ import {
   ActionPanel,
   Cache,
   Color,
-  environment,
   getPreferenceValues,
   Icon,
   launchCommand,
@@ -24,8 +23,8 @@ import {
   sendTestNotification,
   STATE_DIRECTORY,
   type Outlook,
-  type Snapshot,
 } from "./quota";
+import type { Snapshot } from "./forecast-types";
 
 const colors = {
   normal: Color.SecondaryText,
@@ -115,8 +114,7 @@ interface MonitorHealth {
 }
 
 export default function Forecast() {
-  const { pythonPath, openusagePath, showOutlook } = getPreferenceValues<{
-    pythonPath?: string;
+  const { openusagePath, showOutlook } = getPreferenceValues<{
     openusagePath?: string;
     showOutlook: boolean;
   }>();
@@ -173,9 +171,7 @@ export default function Forecast() {
     const controller = new AbortController();
     setIsLoading(true);
     readForecast({
-      pythonPath,
       openusagePath,
-      assetsPath: environment.assetsPath,
       preview: true,
       signal: controller.signal,
     })
@@ -197,7 +193,7 @@ export default function Forecast() {
         if (!controller.signal.aborted) setIsLoading(false);
       });
     return () => controller.abort();
-  }, [pythonPath, openusagePath, reload]);
+  }, [openusagePath, reload]);
 
   useEffect(() => {
     setOutlooks([]);

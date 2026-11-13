@@ -3,9 +3,10 @@ import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
+import { processForecast } from "./forecast-engine.ts";
+import type { Snapshot } from "./forecast-types.ts";
+import { sendNotification } from "./notifications.ts";
 
 const execute = promisify(execFile);
 export const STATE_DIRECTORY = join(
@@ -15,27 +16,6 @@ export const STATE_DIRECTORY = join(
   "AI Forecast",
 );
 export const API_URL = "http://127.0.0.1:6736/v1/limits";
-const NOTIFICATION_SCRIPT =
-  "on run argv\n display notification (item 2 of argv) with title (item 1 of argv)\nend run";
-
-export type Severity = "normal" | "yellow" | "red" | "unavailable";
-export interface QuotaWindow {
-  id: string;
-  accountId: string;
-  provider: string;
-  providerName: string;
-  plan: string;
-  title: string;
-  meter: string;
-  reset: string;
-  severity: Severity;
-  forecast?: { summary: string; detail: string; severity: Severity };
-}
-export interface Snapshot {
-  windows: QuotaWindow[];
-  status: string;
-  severity: Severity;
-}
 export type ResetSource = "codex-reset.com" | "willcodexquotareset.com";
 export interface Outlook {
   source: ResetSource;
@@ -47,66 +27,10 @@ export interface Outlook {
   note?: string;
 }
 interface EngineOptions {
-  pythonPath?: string;
   openusagePath?: string;
-  assetsPath: string;
   preview: boolean;
   signal?: AbortSignal;
   stateDirectory?: string;
-}
-
-function severity(value: string): Severity {
-  return value === "yellow" || value === "red" || value === "unavailable"
-    ? value
-    : "normal";
-}
-
-function parseRows(output: string): Snapshot {
-  const rows = output
-    .trim()
-    .split("\n")
-    .map((line) => line.split("\t"));
-  const providers = new Map(
-    rows
-      .filter((row) => row[0] === "provider" && row[6] === "on")
-      .map((row) => [row[1], row]),
-  );
-  const forecasts = new Map(
-    rows
-      .filter((row) => row[0] === "forecast" && row[6] === "on")
-      .map((row) => [row[1], row]),
-  );
-  const status = rows.find((row) => row[0] === "status");
-  if (!status || rows[0]?.[0] !== "summary")
-    throw new Error("The forecast engine returned an invalid response.");
-  const windows: QuotaWindow[] = [];
-  for (const row of rows) {
-    if (row[0] !== "resource" || row[6] !== "on") continue;
-    const accountId = row[1].split(".")[0];
-    const provider = accountId.split("@")[0];
-    const source = providers.get(accountId);
-    if (!source) continue;
-    const projection = forecasts.get(row[1]);
-    windows.push({
-      id: row[1],
-      accountId,
-      provider,
-      providerName: source[2],
-      plan: source[3],
-      title: row[2],
-      meter: row[3],
-      reset: row[4],
-      severity: severity(row[5]),
-      forecast: projection
-        ? {
-            summary: projection[3],
-            detail: projection[4],
-            severity: severity(projection[5]),
-          }
-        : undefined,
-    });
-  }
-  return { windows, status: status[1], severity: severity(status[2]) };
 }
 
 async function findExecutable(
@@ -119,7 +43,6 @@ async function findExecutable(
   ]) {
     if (!isAbsolute(directory)) continue;
     const candidate = join(directory, name);
-    if (candidate === "/usr/bin/python3") continue;
     try {
       await access(candidate, constants.X_OK);
       return candidate;
@@ -177,7 +100,25 @@ async function readSnapshot(
       redirect: "error",
     });
     if (!response.ok) throw new Error("Snapshot unavailable");
-    return await response.text();
+    if (!response.body) throw new Error("Snapshot unavailable");
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 1024 * 1024) {
+          await reader.cancel();
+          throw new Error("Snapshot exceeds 1 MiB");
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return Buffer.concat(chunks, size).toString("utf8");
   } catch (error) {
     if (signal?.aborted) throw error;
     throw new Error(
@@ -187,60 +128,26 @@ async function readSnapshot(
 }
 
 export async function readForecast(options: EngineOptions): Promise<Snapshot> {
-  const pythonPath =
-    options.pythonPath?.trim() ||
-    (await findExecutable("python3", [
-      "/opt/homebrew/bin",
-      "/usr/local/bin",
-      "/Library/Developer/CommandLineTools/usr/bin",
-    ]));
-  if (!pythonPath)
-    throw new Error(
-      "Python 3 was not found. Install Python 3 or set the optional interpreter override in extension preferences.",
-    );
+  options.signal?.throwIfAborted();
   const payload = await readSnapshot(options.openusagePath, options.signal);
-  const args = [
-    join(options.assetsPath, "openusage-model.py"),
-    "--state-dir",
-    options.stateDirectory ?? STATE_DIRECTORY,
-  ];
-  if (options.preview) args.push("--preview");
   try {
-    const execution = execute(pythonPath, args, {
-      timeout: options.preview ? 5000 : 45000,
-      maxBuffer: 1024 * 1024,
+    return await processForecast(JSON.parse(payload), {
+      stateDirectory: options.stateDirectory ?? STATE_DIRECTORY,
+      preview: options.preview,
       signal: options.signal,
     });
-    const [, { stdout }] = await Promise.all([
-      execution.child.stdin
-        ? pipeline(Readable.from([payload]), execution.child.stdin)
-        : Promise.resolve(),
-      execution,
-    ]);
-    return parseRows(stdout);
   } catch (error) {
     if (options.signal?.aborted) throw error;
-    const code =
-      error && typeof error === "object" && "code" in error
-        ? error.code
-        : undefined;
-    if (code === "ENOENT")
-      throw new Error(
-        "Python 3 could not be started. Check the Python executable in extension preferences.",
-      );
     if (
-      error &&
-      typeof error === "object" &&
-      "stderr" in error &&
-      typeof error.stderr === "string" &&
-      error.stderr.startsWith("OpenUsage: Ambiguous legacy history")
+      error instanceof Error &&
+      error.message.startsWith("Ambiguous legacy history")
     ) {
       throw new Error(
         "Previous quota history matches multiple accounts. Follow the README's legacy-account migration instructions before monitoring; history has not been discarded.",
       );
     }
     throw new Error(
-      "The forecast engine could not read the snapshot or saved history. Check Python and history permissions; do not reset your history.",
+      "The forecast engine could not read the snapshot or saved history. Check OpenUsage and history permissions; do not reset your history.",
     );
   }
 }
@@ -467,14 +374,8 @@ export async function openOutlook(source: ResetSource): Promise<void> {
 }
 
 export async function sendTestNotification(): Promise<void> {
-  await execute(
-    "/usr/bin/osascript",
-    [
-      "-e",
-      NOTIFICATION_SCRIPT,
-      "AI Forecast",
-      "Notification test — quota monitoring only alerts on sustained risk or exhaustion.",
-    ],
-    { timeout: 10000 },
+  await sendNotification(
+    "AI Forecast",
+    "Notification test — quota monitoring only alerts on sustained risk or exhaustion.",
   );
 }

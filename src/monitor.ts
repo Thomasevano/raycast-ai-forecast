@@ -20,15 +20,12 @@ export default async function Monitor(): Promise<void> {
     }
     return;
   }
-  const { pythonPath, openusagePath } = getPreferenceValues<{
-    pythonPath?: string;
+  const { openusagePath } = getPreferenceValues<{
     openusagePath?: string;
   }>();
   try {
     const snapshot = await readForecast({
-      pythonPath,
       openusagePath,
-      assetsPath: environment.assetsPath,
       preview: false,
     });
     await LocalStorage.setItem("lastMonitorAt", Date.now());

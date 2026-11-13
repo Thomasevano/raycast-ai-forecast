@@ -4,8 +4,8 @@ A Raycast extension for Claude and Codex quota forecasts and quiet alerts, using
 
 ## Requirements and OpenUsage compatibility
 
-- macOS, [Raycast](https://www.raycast.com/), and [OpenUsage](https://github.com/robinebers/openusage/blob/v0.8.0/README.md#installation) with Claude and/or ChatGPT accounts configured. OpenUsage 0.8.0 requires macOS 15 or newer.
-- Python **3.12 or newer**, using only the standard library. Python 3.12 is the supported baseline; older versions may work but are unverified. For source development, Node.js **22.22.2 or newer** and npm are required by the locked Raycast SDK in [package-lock.json](package-lock.json).
+- **macOS 15 or newer**, [Raycast](https://www.raycast.com/), and [OpenUsage](https://github.com/robinebers/openusage/blob/v0.8.0/README.md#installation) with Claude and/or ChatGPT accounts configured. Native descriptor locking and OpenUsage 0.8.0 both require this macOS baseline.
+- The installed extension runs its TypeScript engine inside Raycast: **no separate Python installation is required**. For source development and the manual history-assignment command, use Node.js **24 or newer** and npm. CI verifies Node.js 24.
 
 ### OpenUsage 0.8.0: cached CLI
 
@@ -19,9 +19,7 @@ The CLI does not refresh usage, sign in, read credentials, or launch OpenUsage. 
 
 If no CLI is installed, AI Forecast falls back to `GET http://127.0.0.1:6736/v1/limits`, accepting the `openusage.limits.v1` schema documented for [OpenUsage 0.7.16](https://github.com/robinebers/openusage/blob/v0.7.16/docs/local-http-api.md). Its local server starts with the app but is disabled for that session if port 6736 is occupied. The API also serves cached snapshots. A CLI that is present but fails does **not** trigger HTTP fallback. Do not downgrade OpenUsage solely for this extension without considering the security and maintenance trade-offs.
 
-The extension searches for executable `python3` in `/opt/homebrew/bin`, `/usr/local/bin`, the Command Line Tools directory, then absolute directories in its `PATH`. It deliberately skips the `/usr/bin/python3` system installer stub during detection. It selects the first executable found, without checking its version; Command Line Tools may provide an older Python. If the selected interpreter is too old or your installation is elsewhere, set **Python executable override** in extension preferences to the full path of a suitable interpreter. We recommend a current Python installed with `brew install python` using [Homebrew](https://docs.brew.sh/Homebrew-and-Python).
-
-The tested forecast engine remains in Python for continuity and its `flock`-based state coordination. A TypeScript rewrite could remove the separate Python runtime, but is not required by the Raycast Store and would not by itself change the Script Editor attribution of AppleScript notifications.
+The TypeScript engine uses the standard macOS `/usr/bin/lockf` utility for BSD `flock` coordination. This preserves the existing history lock without a native npm dependency. It does not change the forecast rules or the Script Editor attribution of AppleScript notifications.
 
 ## Install from source
 
@@ -57,6 +55,8 @@ Raycast schedules the monitor approximately once a minute, not on an exact timer
 
 There is no notification merely because the forecast was opened, or for every percentage change.
 
+Optional [Warning/Critical thresholds](https://github.com/Thomasevano/raycast-ai-forecast/issues/2) and a [Use It or Lose It reminder](https://github.com/Thomasevano/raycast-ai-forecast/issues/3) are deferred proposals, not implemented alert categories. See the [native-alert assessment](docs/native-alerts.md) for the distinction between OpenUsage's policies and this extension's.
+
 ## macOS notifications
 
 Quota alerts and the test action use `/usr/bin/osascript` to submit AppleScript notifications, attributed to **Script Editor** (`com.apple.ScriptEditor2`). In **System Settings → Notifications → Script Editor**, allow notifications and choose an alert style. Focus, display sleep and other notification settings can affect presentation; see [Apple's notification settings guide](https://support.apple.com/guide/mac-help/change-notifications-settings-mh40583/mac). A successful script dispatch does **not** prove a banner was displayed. Raycast toasts are feedback for explicit actions, not the background quota alert mechanism.
@@ -86,10 +86,12 @@ Version 1 numeric samples and notification deduplication state are adopted for a
 
 State version 3 preserves earlier account bindings and exhaustion/risk flags. Older numeric samples lack trustworthy plan/window provenance: they are retained separately, not used as input to the new pace profile, which must learn once from fresh readings. The earlier numeric history is retained; no historical weeks are invented.
 
-To resolve an **Ambiguous legacy history** error, use the exact account ID from your trusted local OpenUsage CLI output and bind the old history explicitly. Stop monitoring first and use your actual absolute paths and account ID in this example:
+The Python-to-TypeScript upgrade reads the same state file and versions 1–3 directly; it needs no export, history reset or one-time conversion command. The explicit assignment below is only for ambiguous legacy accounts.
+
+To resolve an **Ambiguous legacy history** error, use the exact account ID from your trusted local OpenUsage CLI output and bind the old history explicitly. Stop monitoring first. From this repository's directory, after installing its source requirements, use your actual account ID:
 
 ```sh
-openusage | python3 /absolute/path/to/raycast-ai-forecast/assets/openusage-model.py \
+openusage | npm run migrate-history -- \
   --state-dir "$HOME/Library/Application Support/AI Forecast" \
   --assign-legacy 'claude=claude@ACCOUNT_ID'
 ```
@@ -116,4 +118,4 @@ npm run lint
 npm run bundle
 ```
 
-The Python suite covers forecast math, freshness, resets, out-of-order data, notification deduplication and failures, permissions, corrupt state, and preview isolation. A build or test suite alone does not verify Raycast's native window, background scheduler, or Notification Center presentation.
+The Node suite covers forecast math, freshness, resets, account migration, notification retries, concurrent monitors, native lock interoperability, permissions, corruption, read-only preview, and isolated CLI/HTTP adapters. Fixtures use temporary history and injected notification delivery; no real account or notification is needed. A build or test suite alone does not verify Raycast's native window, background scheduler, or Notification Center presentation.
