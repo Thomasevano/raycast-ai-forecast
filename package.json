@@ -43,15 +43,6 @@
   ],
   "preferences": [
     {
-      "name": "pythonPath",
-      "type": "textfield",
-      "title": "Python executable override",
-      "description": "Optional trusted executable. Leave blank to detect installed Python 3 automatically. Python 3.12 or newer is recommended.",
-      "placeholder": "/opt/homebrew/bin/python3",
-      "default": "",
-      "required": false
-    },
-    {
       "name": "openusagePath",
       "type": "textfield",
       "title": "OpenUsage helper override",
@@ -76,7 +67,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "ray lint",
     "fix-lint": "ray lint --fix",
-    "test": "python3 -B -m unittest discover -s tests -p 'test_*.py' -v && node --test tests/test-outlooks.mjs",
+    "test": "node --test tests/test-*.mjs",
+    "migrate-history": "node scripts/migrate-history.ts",
     "bundle": "ray bundle"
   },
   "dependencies": {

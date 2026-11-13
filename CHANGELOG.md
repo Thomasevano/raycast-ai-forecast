@@ -1,5 +1,11 @@
 # AI Forecast Changelog
 
+## [Unreleased]
+
+- Run forecasts and quiet alerts directly in TypeScript, removing the Python installation and executable preference.
+- Preserve existing history, account bindings, forecast rules and alert deduplication, using native BSD locks on macOS 15 or newer for concurrent checks.
+- Provide a TypeScript history-assignment command for ambiguous legacy accounts; notification delivery remains attributed to Script Editor.
+
 ## [Initial Release] - 2026-11-13
 
 - Show Claude and Codex weekly and Session forecasts, with allowance per day or hour and a distinct estimated pace.
