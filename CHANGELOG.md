@@ -9,6 +9,7 @@
 - Detect OpenUsage's bundled helper without requiring its administrator-installed CLI link; cache version detection until the executable changes and reject changes during probing.
 - Use cached CLI reads for OpenUsage 0.8+, but cached HTTP for recognized older helpers, never invoking their credential-reading usage command.
 - Require Raycast 2 on macOS Tahoe 26 or newer and Apple Silicon; the standalone engine retains its macOS 15 locking requirement.
+- Keep monitoring status consistent with native boolean/numeric storage and update health only when readings, errors or overdue status change.
 
 ## [Initial Release] - 2026-11-13
 

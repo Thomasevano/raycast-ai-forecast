@@ -25,6 +25,11 @@ import {
   type Outlook,
 } from "./quota";
 import type { Snapshot } from "./forecast-types";
+import {
+  monitoringEnabled,
+  updateMonitorHealth,
+  type MonitorHealth,
+} from "./monitoring-state";
 
 const colors = {
   normal: Color.SecondaryText,
@@ -106,13 +111,6 @@ function ForecastActions(props: {
   );
 }
 
-interface MonitorHealth {
-  enabled?: boolean;
-  last?: number;
-  error?: string;
-  checkedAt: number;
-}
-
 export default function Forecast() {
   const { openusagePath, showOutlook } = getPreferenceValues<{
     openusagePath?: string;
@@ -139,24 +137,35 @@ export default function Forecast() {
     async function refreshMonitorHealth() {
       try {
         const [enabled, last, error] = await Promise.all([
-          LocalStorage.getItem<boolean>("monitoring"),
+          LocalStorage.getItem("monitoring"),
           LocalStorage.getItem<number>("lastMonitorAt"),
           LocalStorage.getItem<string>("monitorError"),
         ]);
-        if (active)
-          setHealth({
-            enabled: enabled === true,
-            last,
-            error,
-            checkedAt: Date.now(),
-          });
+        const isEnabled = monitoringEnabled(enabled);
+        if (active) {
+          const checkedAt = Date.now();
+          setHealth((previous) =>
+            updateMonitorHealth(
+              previous,
+              { enabled: isEnabled, last, error },
+              checkedAt,
+            ),
+          );
+        }
       } catch {
-        if (active)
-          setHealth({
-            error:
-              "Monitoring settings could not be read. Refresh to try again.",
-            checkedAt: Date.now(),
-          });
+        if (active) {
+          const checkedAt = Date.now();
+          setHealth((previous) =>
+            updateMonitorHealth(
+              previous,
+              {
+                error:
+                  "Monitoring settings could not be read. Refresh to try again.",
+              },
+              checkedAt,
+            ),
+          );
+        }
       }
     }
     void refreshMonitorHealth();
