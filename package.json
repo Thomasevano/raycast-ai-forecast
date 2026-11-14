@@ -46,7 +46,7 @@
       "name": "openusagePath",
       "type": "textfield",
       "title": "OpenUsage helper override",
-      "description": "Optional trusted executable. Leave blank to detect the installed OpenUsage CLI. Without a CLI, compatible 0.7.x releases use the local HTTP API.",
+      "description": "Leave blank to detect OpenUsage's bundled or installed helper. An override must be a trusted executable. Version 0.8+ uses cached CLI data; older recognized versions use local HTTP.",
       "placeholder": "/usr/local/bin/openusage",
       "default": "",
       "required": false

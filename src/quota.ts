@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
@@ -57,6 +57,43 @@ async function findExecutable(
   }
 }
 
+let helperVersion: { identity: string; cachedOnly: boolean } | undefined;
+
+async function helperIdentity(cli: string): Promise<string> {
+  const file = await stat(cli);
+  if (!file.isFile()) throw new Error("Not a file");
+  return `${cli}:${file.dev}:${file.ino}:${file.size}:${file.mtimeMs}:${file.ctimeMs}`;
+}
+
+async function hasCachedCLI(
+  cli: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  try {
+    const identity = await helperIdentity(cli);
+    if (helperVersion?.identity === identity) return helperVersion.cachedOnly;
+    const { stdout } = await execute(cli, ["--version"], {
+      timeout: 2500,
+      maxBuffer: 4096,
+      signal,
+    });
+    if ((await helperIdentity(cli)) !== identity) {
+      helperVersion = undefined;
+      throw new Error("Helper changed during version detection");
+    }
+    const version = /^openusage (\d+)\.(\d+)\.(\d+)$/.exec(stdout.trim());
+    if (!version) throw new Error("Unrecognized version");
+    const cachedOnly = Number(version[1]) > 0 || Number(version[2]) >= 8;
+    helperVersion = { identity, cachedOnly };
+    return cachedOnly;
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(
+      "OpenUsage's helper version could not be identified safely. Check the helper path in extension preferences; no usage command was run.",
+    );
+  }
+}
+
 async function readSnapshot(
   openusagePath?: string,
   signal?: AbortSignal,
@@ -64,10 +101,12 @@ async function readSnapshot(
   const cli =
     openusagePath?.trim() ||
     (await findExecutable("openusage", [
+      join(homedir(), "Applications", "OpenUsage.app", "Contents", "Helpers"),
+      "/Applications/OpenUsage.app/Contents/Helpers",
       "/usr/local/bin",
       "/opt/homebrew/bin",
     ]));
-  if (cli) {
+  if (cli && (await hasCachedCLI(cli, signal))) {
     try {
       const { stdout } = await execute(cli, [], {
         timeout: 2500,
@@ -122,7 +161,7 @@ async function readSnapshot(
   } catch (error) {
     if (signal?.aborted) throw error;
     throw new Error(
-      "OpenUsage is unavailable. In OpenUsage 0.8 or newer, install the command-line helper from Settings → Advanced → Command Line. Older 0.7.x releases can use the local HTTP API.",
+      "OpenUsage is unavailable. Open OpenUsage and configure your accounts. If its bundled helper is not detected, set the helper override in extension preferences. Compatible older releases require the local HTTP API.",
     );
   }
 }
