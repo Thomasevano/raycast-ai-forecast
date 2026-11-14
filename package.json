@@ -2,6 +2,7 @@
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "ai-forecast",
   "private": true,
+  "type": "module",
   "title": "AI Forecast",
   "description": "Weekly and Session quota forecasts, learned usage pace and quiet alerts from local OpenUsage data.",
   "icon": "extension-icon.png",

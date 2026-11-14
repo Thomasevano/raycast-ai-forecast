@@ -5,8 +5,8 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-function aborted(signal?: AbortSignal): void {
-  signal?.throwIfAborted();
+function isMissingFile(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 export async function readState(
@@ -19,13 +19,13 @@ export async function readState(
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if (isMissingFile(error)) return undefined;
     throw error;
   }
   try {
     if (!(await file.stat()).isFile())
       throw new Error("State file must be a regular file");
-    return JSON.parse(await file.readFile("utf8")) as unknown;
+    return JSON.parse(await file.readFile("utf8"));
   } finally {
     await file.close();
   }
@@ -47,7 +47,7 @@ export async function saveState(
     if ((await lstat(destination)).isSymbolicLink())
       throw new Error("State file must not be a symbolic link");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if (!isMissingFile(error)) throw error;
   }
   const temporary = join(directory, `.state-${randomUUID()}`);
   let created = false;
@@ -78,8 +78,8 @@ export async function saveState(
     }
   } finally {
     if (created)
-      await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== "ENOENT") throw error;
+      await unlink(temporary).catch((error: unknown) => {
+        if (!isMissingFile(error)) throw error;
       });
   }
 }
@@ -89,7 +89,7 @@ async function tryAcquire(
   timeout: number,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  aborted(signal);
+  signal?.throwIfAborted();
   const child = spawn("/usr/bin/lockf", ["-s", "-t", "0", "3"], {
     stdio: ["ignore", "ignore", "pipe", fd],
   });
@@ -115,7 +115,7 @@ async function tryAcquire(
       });
       child.on("close", resolve);
     });
-    aborted(signal);
+    signal?.throwIfAborted();
     if (failure) throw failure;
     if (code === 75) return false; // EX_TEMPFAIL: another process owns the lock.
     if (code !== 0)
@@ -132,7 +132,7 @@ async function tryAcquire(
 async function acquire(fd: number, signal?: AbortSignal): Promise<void> {
   const deadline = performance.now() + 30_000;
   for (;;) {
-    aborted(signal);
+    signal?.throwIfAborted();
     const remaining = deadline - performance.now();
     if (remaining <= 0) throw new Error("Timed out acquiring state lock");
     if (await tryAcquire(fd, remaining, signal)) return;
@@ -152,11 +152,11 @@ export async function withStateLock<T>(
   operation: () => Promise<T>,
   signal?: AbortSignal,
 ): Promise<T> {
-  aborted(signal);
+  signal?.throwIfAborted();
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  aborted(signal);
+  signal?.throwIfAborted();
   await chmod(directory, 0o700);
-  aborted(signal);
+  signal?.throwIfAborted();
   const file = await open(
     join(directory, "state.lock"),
     constants.O_RDWR |
@@ -169,9 +169,9 @@ export async function withStateLock<T>(
     if (!(await file.stat()).isFile())
       throw new Error("Lock file must be a regular file");
     await file.chmod(0o600);
-    aborted(signal);
+    signal?.throwIfAborted();
     await acquire(file.fd, signal);
-    aborted(signal);
+    signal?.throwIfAborted();
     // Tighten an existing history file without following a leaf symlink.
     let existing;
     try {
@@ -180,7 +180,7 @@ export async function withStateLock<T>(
         constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
       );
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (!isMissingFile(error)) throw error;
     }
     if (existing) {
       try {
@@ -191,7 +191,7 @@ export async function withStateLock<T>(
         await existing.close();
       }
     }
-    aborted(signal);
+    signal?.throwIfAborted();
     return await operation();
   } finally {
     await file.close();
