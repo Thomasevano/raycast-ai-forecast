@@ -696,7 +696,7 @@ export async function renderForecast(
         const unit = kind === "weekly" ? "day" : "hour";
         const progress = result.ready
           ? `Observed this cycle: ${result.readings} fresh readings across ${(result.span / HOUR).toFixed(1)} elapsed hours`
-          : `Learning: ${result.readings}/3 fresh readings; ${(result.span / HOUR).toFixed(1)}/${(result.required / HOUR).toFixed(1)} elapsed hours`;
+          : `Learning: ${result.readings} fresh readings (minimum 3); ${(result.span / HOUR).toFixed(1)}/${(result.required / HOUR).toFixed(1)} elapsed hours`;
         const allowance =
           reset - now < (kind === "weekly" ? DAY : HOUR)
             ? `Remaining until reset: approximately ${(Math.max(0, 1 - used) * 100).toFixed(1)} quota points`

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "title": "AI Forecast",
-  "description": "Weekly and Session quota forecasts, learned usage pace and quiet alerts from local OpenUsage data.",
+  "description": "Claude and Codex quota forecasts and alerts from local OpenUsage snapshots.",
   "icon": "extension-icon.png",
   "author": "Thomasevano",
   "license": "MIT",
@@ -22,7 +22,7 @@
     {
       "name": "forecast",
       "title": "AI Forecast",
-      "description": "Check Claude and Codex forecasts, allowance per day or hour, and your learned usage pace.",
+      "description": "Check remaining quota, daily or hourly allowance, and estimated usage pace.",
       "mode": "view",
       "keywords": [
         "quota",

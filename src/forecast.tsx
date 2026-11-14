@@ -97,7 +97,7 @@ function ForecastActions(props: {
           onAction={() =>
             perform(
               sendTestNotification,
-              "Notification submitted — check Script Editor notifications",
+              "Notification submitted. Check Script Editor notifications.",
             )
           }
         />
@@ -313,7 +313,7 @@ export default function Forecast() {
           icon={Icon.Warning}
           detail={
             <List.Item.Detail
-              markdown={`## ${error ? "Forecast unavailable" : "No usable quota windows"}\n\n${error ?? snapshot?.status}\n\nKeep OpenUsage running with its command-line helper installed, or use a compatible 0.7.x local API. Connect Claude or Codex there, then refresh. Monitoring controls remain available below.`}
+              markdown={`## ${error ? "Forecast unavailable" : "No usable quota windows"}\n\n${error ?? snapshot?.status}\n\nOpen OpenUsage and connect Claude or Codex, then refresh. OpenUsage 0.8+ uses its bundled helper; compatible older releases use the local API. Monitoring controls remain available below.`}
             />
           }
           actions={actions}
@@ -422,7 +422,7 @@ export default function Forecast() {
             accessories={[{ text: monitoringStatus }]}
             detail={
               <List.Item.Detail
-                markdown={`## Learn quietly in the background\n\n**Start Monitoring** to collect fresh quota readings. Opening this view only previews the forecast; it never saves samples or sends quota alerts.\n\nA new weekly model needs **3 readings spanning 6 hours**. A Session model needs **3 readings spanning 1 hour**, or one quarter of its window if shorter. These are elapsed hours, including idle time—not conversations or hours spent working.\n\nEligible previous cycles provide a provisional estimate while the current cycle learns. Allowance is an even-pace guideline; estimated pace is your modeled consumption rate.\n\nOnly sustained **weekly** risk or quota exhaustion triggers an alert. Raycast must stay running with background refresh enabled for **Monitor AI Quotas**; checks are approximately once a minute.\n\nFor banners, allow **Script Editor** in macOS Notifications. Focus and sleep can delay or hide them.${monitorError ? `\n\n**Last check failed:** ${monitorError}` : ""}`}
+                markdown={`## Background quota checks\n\n**Start Monitoring** to save fresh quota readings. Opening AI Forecast is read-only: it does not save samples or send quota alerts.\n\nA weekly model needs **3 readings spanning 6 hours**. A Session model needs **3 readings spanning 1 hour**, or a quarter of its window if shorter. This is elapsed time, including idle time. A Session is a quota window, not a conversation.\n\nPrevious eligible cycles provide a provisional estimate while the current cycle learns. Allowance spreads the remaining quota until reset; estimated pace models your consumption.\n\nAlerts cover sustained **weekly** risk and quota exhaustion. Keep Raycast running and enable background refresh for **Monitor AI Quotas**. Checks run roughly once a minute.\n\nAllow **Script Editor** in macOS Notifications to receive banners. Focus and sleep can delay or hide them.${monitorError ? `\n\n**Last check failed:** ${monitorError}` : ""}`}
                 metadata={
                   <List.Item.Detail.Metadata>
                     <List.Item.Detail.Metadata.Label
