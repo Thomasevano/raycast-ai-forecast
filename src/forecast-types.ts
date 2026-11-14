@@ -58,6 +58,7 @@ export interface ForecastState {
   version: 1 | 2 | 3;
   windows: Record<string, WindowState>;
   legacy_bindings?: Partial<Record<ProviderKind, string>>;
+  v1_card_bindings?: Partial<Record<ProviderKind, string>>;
 }
 
 export type Notifier = (title: string, body: string) => void | Promise<void>;

@@ -47,7 +47,7 @@ export async function processForecast(
   if (options.preview) {
     const state = await loadState(options.stateDirectory);
     options.signal?.throwIfAborted();
-    migrateState(state, source.providers);
+    migrateState(state, source);
     return renderForecast(source, state, now, nothing, nothing);
   }
   return withStateLock(
@@ -55,7 +55,7 @@ export async function processForecast(
     async () => {
       const state = await loadState(options.stateDirectory);
       options.signal?.throwIfAborted();
-      migrateState(state, source.providers, options.assignLegacy);
+      migrateState(state, source, options.assignLegacy);
       const commit = () => saveState(options.stateDirectory, state);
       if (options.assignLegacy !== undefined) {
         await commit();

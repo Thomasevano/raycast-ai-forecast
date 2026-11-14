@@ -25,11 +25,17 @@ const record = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 const number = (v: unknown): v is number =>
   typeof v === "number" && Number.isFinite(v);
-const accountKind = (v: unknown): ProviderKind | undefined =>
-  typeof v === "string"
-    ? (/^(claude|codex)@[A-Za-z0-9_-]{1,128}$/.exec(v)?.[1] as
-        ProviderKind | undefined)
-    : undefined;
+const integer = (v: unknown): v is number =>
+  typeof v === "number" && Number.isInteger(v);
+const isProviderKind = (v: unknown): v is ProviderKind =>
+  v === "claude" || v === "codex";
+function accountKind(value: unknown): ProviderKind | undefined {
+  const match =
+    typeof value === "string"
+      ? /^([^@]+)@[A-Za-z0-9_-]{1,128}$/.exec(value)
+      : null;
+  return match && isProviderKind(match[1]) ? match[1] : undefined;
+}
 const confidenceSpan = (kind: WindowKind, window: number) =>
   kind === "weekly" ? 6 * HOUR : Math.min(HOUR, window / 4);
 const timestamp = (v: unknown): number | undefined => {
@@ -115,15 +121,16 @@ export function parseSnapshot(input: unknown): SourceSnapshot {
         accountId: kind,
         data: record(input.providers[kind]) ? input.providers[kind] : undefined,
       });
-  } else {
-    for (const [accountId, data] of Object.entries(input.providers)) {
-      const kind = accountKind(accountId);
-      if (kind) {
-        if (!record(data)) throw new Error("Invalid OpenUsage account payload");
-        providers.push({ kind, accountId, data });
-      } else if (kinds.includes(accountId.split("@")[0] as ProviderKind))
-        throw new Error("Invalid OpenUsage account identifier");
-    }
+  }
+  for (const [accountId, data] of Object.entries(input.providers)) {
+    if (input.schema === "openusage.limits.v1" && isProviderKind(accountId))
+      continue;
+    const kind = accountKind(accountId);
+    if (kind) {
+      if (!record(data)) throw new Error("Invalid OpenUsage account payload");
+      providers.push({ kind, accountId, data });
+    } else if (isProviderKind(accountId.split("@")[0]))
+      throw new Error("Invalid OpenUsage account identifier");
   }
   return {
     schema: input.schema,
@@ -135,7 +142,7 @@ export function parseSnapshot(input: unknown): SourceSnapshot {
 export function validateState(input: unknown): asserts input is ForecastState {
   if (
     !record(input) ||
-    ![1, 2, 3].includes(input.version as number) ||
+    (input.version !== 1 && input.version !== 2 && input.version !== 3) ||
     !record(input.windows)
   )
     throw new Error("Invalid OpenUsage state");
@@ -145,18 +152,29 @@ export function validateState(input: unknown): asserts input is ForecastState {
     !record(bindings) ||
     Object.entries(bindings).some(
       ([kind, account]) =>
-        !kinds.includes(kind as ProviderKind) || accountKind(account) !== kind,
+        !isProviderKind(kind) || accountKind(account) !== kind,
     )
   )
     throw new Error("Invalid OpenUsage legacy bindings");
+  const cards =
+    input.v1_card_bindings === undefined ? {} : input.v1_card_bindings;
+  if (
+    !record(cards) ||
+    Object.entries(cards).some(
+      ([kind, account]) =>
+        !isProviderKind(kind) ||
+        (account !== kind && accountKind(account) !== kind),
+    )
+  )
+    throw new Error("Invalid OpenUsage v1 card bindings");
   for (const [key, item] of Object.entries(input.windows)) {
     const separator = key.lastIndexOf("."),
       account = key.slice(0, separator),
-      kind = key.slice(separator + 1) as WindowKind;
+      kind = key.slice(separator + 1);
     if (
       separator < 0 ||
-      !windows.includes(kind) ||
-      (!kinds.includes(account as ProviderKind) && !accountKind(account)) ||
+      (kind !== "weekly" && kind !== "session") ||
+      (!isProviderKind(account) && !accountKind(account)) ||
       !record(item)
     )
       throw new Error("Invalid OpenUsage window state");
@@ -196,8 +214,8 @@ export function validateState(input: unknown): asserts input is ForecastState {
       item.pending !== null &&
       (!record(item.pending) ||
         !number(item.pending.since) ||
-        !Number.isInteger(item.pending.count) ||
-        (item.pending.count as number) < 1)
+        !integer(item.pending.count) ||
+        item.pending.count < 1)
     )
       throw new Error("Invalid OpenUsage pending alert");
     if (
@@ -234,8 +252,8 @@ export function validateState(input: unknown): asserts input is ForecastState {
         !number(cycle.span) ||
         cycle.rate < 0 ||
         cycle.span < confidenceSpan(kind, metadata.window) ||
-        !Number.isInteger(cycle.readings) ||
-        (cycle.readings as number) < 3 ||
+        !integer(cycle.readings) ||
+        cycle.readings < 3 ||
         cycle.reset >= item.reset ||
         cycle.reset <= lastReset
       )
@@ -247,29 +265,22 @@ export function validateState(input: unknown): asserts input is ForecastState {
 
 export function migrateState(
   state: ForecastState,
-  providers: SourceProvider[],
+  snapshot: SourceSnapshot,
   assignments?: readonly string[],
 ): void {
+  const { providers } = snapshot;
   const bindings = state.legacy_bindings ?? {};
-  const accounts = Object.fromEntries(
-    kinds.map((kind) => [
-      kind,
-      providers
-        .filter((p) => p.kind === kind && p.accountId !== kind)
-        .map((p) => p.accountId),
-    ]),
-  ) as Record<ProviderKind, string[]>;
+  const accounts: Record<ProviderKind, string[]> = { claude: [], codex: [] };
+  for (const { kind, accountId } of providers)
+    if (accountId !== kind) accounts[kind].push(accountId);
   const choices: Partial<Record<ProviderKind, string>> = {};
   if (assignments !== undefined) {
     for (const assignment of assignments) {
-      const match =
-        typeof assignment === "string"
-          ? /^(claude|codex)=(.*)$/.exec(assignment)
-          : null;
-      if (!match) throw new Error("Invalid legacy assignment");
-      const kind = match[1] as ProviderKind,
-        account = match[2];
+      const separator = assignment.indexOf("="),
+        kind = assignment.slice(0, separator),
+        account = assignment.slice(separator + 1);
       if (
+        !isProviderKind(kind) ||
         choices[kind] ||
         accountKind(account) !== kind ||
         !accounts[kind].includes(account)
@@ -278,8 +289,9 @@ export function migrateState(
       if (bindings[kind]) throw new Error("Legacy provider already bound");
       choices[kind] = account;
     }
-  } else {
+  } else if (snapshot.schema === "openusage.limits.v2") {
     for (const kind of kinds) {
+      if (state.v1_card_bindings?.[kind]) continue;
       const legacy = windows.some((window) =>
         Object.hasOwn(state.windows, `${kind}.${window}`),
       );
@@ -315,6 +327,14 @@ export function migrateState(
       }
     }
     bindings[kind] = account;
+    if (state.v1_card_bindings?.[kind]) state.v1_card_bindings[kind] = account;
+  }
+  if (
+    snapshot.schema === "openusage.limits.v1" &&
+    snapshot.providers.some(({ accountId, kind }) => accountId !== kind)
+  ) {
+    const cards = (state.v1_card_bindings ??= {});
+    for (const kind of kinds) cards[kind] ??= kind;
   }
   state.legacy_bindings = bindings;
   state.version = 3;
@@ -419,7 +439,9 @@ export async function renderForecast(
       title = clean(provider.displayName);
     const stateAccount =
       name === providerKind
-        ? (state.legacy_bindings?.[providerKind] ?? name)
+        ? (state.v1_card_bindings?.[providerKind] ??
+          state.legacy_bindings?.[providerKind] ??
+          name)
         : name;
     if (!provider) continue;
     const fetched = timestamp(provider.fetchedAt),

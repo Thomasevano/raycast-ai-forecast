@@ -47,7 +47,7 @@ function harness(state = initial()) {
       events.push({ title, body });
     },
   ) {
-    migrateState(state, snapshot.providers);
+    migrateState(state, snapshot);
     return renderForecast(snapshot, state, now, notifier, async () => {
       commits.push(structuredClone(state));
     });
@@ -99,6 +99,8 @@ test("validates inputs and preserves legacy state fields without mutation", () =
     },
     { version: 3, windows: { "codex.weekly": windowState([[NOW, -1]]) } },
     { version: 3, windows: {}, legacy_bindings: { codex: "claude@x" } },
+    { version: 3, windows: {}, v1_card_bindings: null },
+    { version: 3, windows: {}, v1_card_bindings: { codex: "claude@x" } },
   ])
     assert.throws(() => validateState(invalid));
 });
@@ -112,16 +114,13 @@ test("legacy binding is atomic, unambiguous, explicit, and sticky across formats
     "codex@two": provider({ weekly: quota(0.2) }),
   });
   const before = structuredClone(state);
-  assert.throws(() => migrateState(state, multiple.providers));
+  assert.throws(() => migrateState(state, multiple));
   assert.deepEqual(state, before);
   assert.throws(() =>
-    migrateState(state, multiple.providers, [
-      "codex=codex@one",
-      "claude=claude@missing",
-    ]),
+    migrateState(state, multiple, ["codex=codex@one", "claude=claude@missing"]),
   );
   assert.deepEqual(state, before);
-  migrateState(state, multiple.providers, ["codex=codex@one"]);
+  migrateState(state, multiple, ["codex=codex@one"]);
   assert.deepEqual(state.windows["codex@one.weekly"], legacy);
   assert.equal(state.legacy_bindings.codex, "codex@one");
   const h = harness(state);
@@ -138,10 +137,90 @@ test("legacy binding is atomic, unambiguous, explicit, and sticky across formats
     },
   };
   const original = structuredClone(collision);
-  assert.throws(() =>
-    migrateState(collision, multiple.providers, ["codex=codex@one"]),
-  );
+  assert.throws(() => migrateState(collision, multiple, ["codex=codex@one"]));
   assert.deepEqual(collision, original);
+});
+
+test("downgrading to account-aware HTTP cannot overwrite a bound v2 account", async () => {
+  const existing = windowState([[NOW - HOUR, 0.8]]);
+  const h = harness({
+    version: 3,
+    windows: { "codex@modern.weekly": existing },
+    legacy_bindings: { codex: "codex@modern" },
+  });
+  const before = structuredClone(existing);
+  await h.run(
+    v1({
+      codex: provider({ weekly: quota(0.2) }),
+      "codex@ab12cd34": provider({ weekly: quota(0.4) }),
+    }),
+  );
+  assert.deepEqual(h.state.windows["codex@modern.weekly"], before);
+  assert.deepEqual(h.state.windows["codex.weekly"].samples, [[NOW, 0.2]]);
+  assert.deepEqual(h.state.windows["codex@ab12cd34.weekly"].samples, [
+    [NOW, 0.4],
+  ]);
+  assert.equal(h.state.legacy_bindings.codex, "codex@modern");
+});
+
+test("named-card disappearance after restart cannot redirect history or repeat exhaustion", async () => {
+  const existing = windowState([[NOW - HOUR, 0.8]]);
+  const h = harness({
+    version: 3,
+    windows: { "codex@modern.weekly": existing },
+    legacy_bindings: { codex: "codex@modern" },
+  });
+  await h.run(
+    v1({
+      codex: provider({ weekly: quota(1) }),
+      "codex@ab12cd34": provider({ weekly: quota(0.4) }),
+    }),
+  );
+  assert.equal(h.events.length, 1);
+  const saved = JSON.parse(JSON.stringify(h.state));
+  validateState(saved);
+  const resumed = harness(saved);
+  const before = structuredClone(saved.windows["codex@modern.weekly"]);
+  await resumed.run(v1({ codex: provider({ weekly: quota(1) }) }));
+  assert.deepEqual(resumed.events, []);
+  assert.deepEqual(resumed.state.windows["codex@modern.weekly"], before);
+  assert.equal(resumed.state.windows["codex.weekly"].exhausted, true);
+  assert.equal(resumed.state.legacy_bindings.codex, "codex@modern");
+});
+
+test("legacy HTTP default and named cards retain separate history and alerts", async () => {
+  const exhausted = windowState([[NOW, 1]]);
+  exhausted.exhausted = true;
+  const h = harness({
+    version: 3,
+    windows: { "codex.weekly": exhausted },
+  });
+  const result = await h.run(
+    v1({
+      codex: provider({ weekly: quota(1) }),
+      "codex@ab12cd34": provider({ weekly: quota(0.2) }),
+      "claude@1234abcd": provider({ session: quota(0.4) }),
+    }),
+  );
+  assert.deepEqual(result.windows.map(({ id }) => id).sort(), [
+    "claude@1234abcd.session",
+    "codex.weekly",
+    "codex@ab12cd34.weekly",
+  ]);
+  assert.deepEqual(h.state.windows["codex.weekly"].samples, [[NOW, 1]]);
+  assert.equal(h.state.windows["codex.weekly"].exhausted, true);
+  assert.deepEqual(h.state.windows["codex@ab12cd34.weekly"].samples, [
+    [NOW, 0.2],
+  ]);
+  assert.deepEqual(h.state.legacy_bindings, {});
+  assert.deepEqual(h.events, []);
+  const priorDefault = structuredClone(h.state.windows["codex.weekly"]);
+  await h.run(v2({ "codex@modern": provider({ weekly: quota(0.2) }) }));
+  assert.deepEqual(h.state.windows["codex.weekly"], priorDefault);
+  assert.deepEqual(h.state.windows["codex@modern.weekly"].samples, [
+    [NOW, 0.2],
+  ]);
+  assert.deepEqual(h.events, []);
 });
 
 test("account isolation, sanitized display, partial status and zero usage", async () => {

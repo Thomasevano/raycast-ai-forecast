@@ -82,16 +82,18 @@ AI Forecast stores account IDs, bounded usage samples, window metadata, plan fin
 
 ### Migrating version 1 history
 
-Version 1 numeric samples and notification deduplication state are adopted for a unique account of the same provider kind. When multiple accounts of that kind exist, migration fails closed rather than guessing. The current state records an explicit account binding, which persists when accounts disappear; later v1 input reuses that binding.
+When moving to a v2 snapshot, unqualified family-only legacy history and notification deduplication state are adopted for a unique account of the same provider kind. When multiple accounts of that kind exist, migration fails closed rather than guessing. The current state records an explicit account binding that persists when accounts disappear. Family-only v1 input reuses it unless durable account-aware v1 routing has been established.
 
-State version 3 preserves earlier account bindings and exhaustion/risk flags. Older numeric samples lack trustworthy plan/window provenance: they are retained separately, not used as input to the new pace profile, which must learn once from fresh readings. The earlier numeric history is retained; no historical weeks are invented.
+Account-aware v1 HTTP snapshots keep bare default cards and named cards separate by default: `codex` is not an automatic alias for `codex@…`. This routing survives the disappearance of the last named card and a restart. Identified v1 cards are not automatically moved into new v2 IDs either; the old record is retained and a new ID learns its own pace. Explicit history assignments remain owner-controlled and collision-checked. In a downgrade, v1 cards do not overwrite an existing v2 account binding.
+
+State version 3 preserves earlier account bindings and exhaustion/risk flags. Older numeric samples lack trustworthy plan/window provenance. They are retained separately, not used as input to the new pace profile, which must learn once from fresh readings. No historical weeks are invented.
 
 The Python-to-TypeScript upgrade reads the same state file and versions 1–3 directly; it needs no export, history reset or one-time conversion command. The explicit assignment below is only for ambiguous legacy accounts.
 
-To resolve an **Ambiguous legacy history** error, use the exact account ID from your trusted local OpenUsage CLI output and bind the old history explicitly. Stop monitoring first. From this repository's directory, after installing its source requirements, use your actual account ID:
+To resolve an **Ambiguous legacy history** error, use the exact account ID from your trusted **OpenUsage 0.8 or newer** helper output and bind the old history explicitly. Stop monitoring first. From this repository's directory, after installing its source requirements, use your actual account ID. Replace the bundled helper path below if your app is installed elsewhere; do not use an older CLI's usage command:
 
 ```sh
-openusage | npm run migrate-history -- \
+"/Applications/OpenUsage.app/Contents/Helpers/openusage" | npm run migrate-history -- \
   --state-dir "$HOME/Library/Application Support/AI Forecast" \
   --assign-legacy 'claude=claude@ACCOUNT_ID'
 ```
