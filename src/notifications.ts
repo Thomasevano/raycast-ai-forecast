@@ -9,7 +9,7 @@ export async function sendNotification(
   title: string,
   body: string,
 ): Promise<void> {
-  await execute("/usr/bin/osascript", ["-e", SCRIPT, title, body], {
+  await execute("/usr/bin/osascript", ["-e", SCRIPT, "--", title, body], {
     timeout: 10000,
   });
 }

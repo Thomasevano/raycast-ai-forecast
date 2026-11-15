@@ -10,6 +10,7 @@
 - Preserve separate default/named-card history and alerts in legacy HTTP snapshots, including downgrades from v2 data, disappearing cards and restarts; do not guess identified v1 card ownership on upgrade.
 - Require Raycast 2 on macOS Tahoe 26 or newer and Apple Silicon; the standalone engine retains its macOS 15 locking requirement.
 - Keep monitoring status consistent with native boolean/numeric storage and update health only when readings, errors or overdue status change.
+- Keep notification titles beginning with `-` as data rather than AppleScript command-line options.
 
 ## [Initial release] - 2026-11-13
 
