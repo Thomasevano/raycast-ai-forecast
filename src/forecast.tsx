@@ -3,7 +3,6 @@ import {
   ActionPanel,
   Cache,
   Color,
-  environment,
   getPreferenceValues,
   Icon,
   launchCommand,
@@ -24,8 +23,13 @@ import {
   sendTestNotification,
   STATE_DIRECTORY,
   type Outlook,
-  type Snapshot,
 } from "./quota";
+import type { Snapshot } from "./forecast-types";
+import {
+  monitoringEnabled,
+  updateMonitorHealth,
+  type MonitorHealth,
+} from "./monitoring-state";
 
 const colors = {
   normal: Color.SecondaryText,
@@ -93,7 +97,7 @@ function ForecastActions(props: {
           onAction={() =>
             perform(
               sendTestNotification,
-              "Notification submitted — check Script Editor notifications",
+              "Notification submitted. Check Script Editor notifications.",
             )
           }
         />
@@ -107,16 +111,8 @@ function ForecastActions(props: {
   );
 }
 
-interface MonitorHealth {
-  enabled?: boolean;
-  last?: number;
-  error?: string;
-  checkedAt: number;
-}
-
 export default function Forecast() {
-  const { pythonPath, openusagePath, showOutlook } = getPreferenceValues<{
-    pythonPath?: string;
+  const { openusagePath, showOutlook } = getPreferenceValues<{
     openusagePath?: string;
     showOutlook: boolean;
   }>();
@@ -141,24 +137,35 @@ export default function Forecast() {
     async function refreshMonitorHealth() {
       try {
         const [enabled, last, error] = await Promise.all([
-          LocalStorage.getItem<boolean>("monitoring"),
+          LocalStorage.getItem("monitoring"),
           LocalStorage.getItem<number>("lastMonitorAt"),
           LocalStorage.getItem<string>("monitorError"),
         ]);
-        if (active)
-          setHealth({
-            enabled: enabled === true,
-            last,
-            error,
-            checkedAt: Date.now(),
-          });
+        const isEnabled = monitoringEnabled(enabled);
+        if (active) {
+          const checkedAt = Date.now();
+          setHealth((previous) =>
+            updateMonitorHealth(
+              previous,
+              { enabled: isEnabled, last, error },
+              checkedAt,
+            ),
+          );
+        }
       } catch {
-        if (active)
-          setHealth({
-            error:
-              "Monitoring settings could not be read. Refresh to try again.",
-            checkedAt: Date.now(),
-          });
+        if (active) {
+          const checkedAt = Date.now();
+          setHealth((previous) =>
+            updateMonitorHealth(
+              previous,
+              {
+                error:
+                  "Monitoring settings could not be read. Refresh to try again.",
+              },
+              checkedAt,
+            ),
+          );
+        }
       }
     }
     void refreshMonitorHealth();
@@ -173,9 +180,7 @@ export default function Forecast() {
     const controller = new AbortController();
     setIsLoading(true);
     readForecast({
-      pythonPath,
       openusagePath,
-      assetsPath: environment.assetsPath,
       preview: true,
       signal: controller.signal,
     })
@@ -197,7 +202,7 @@ export default function Forecast() {
         if (!controller.signal.aborted) setIsLoading(false);
       });
     return () => controller.abort();
-  }, [pythonPath, openusagePath, reload]);
+  }, [openusagePath, reload]);
 
   useEffect(() => {
     setOutlooks([]);
@@ -308,7 +313,7 @@ export default function Forecast() {
           icon={Icon.Warning}
           detail={
             <List.Item.Detail
-              markdown={`## ${error ? "Forecast unavailable" : "No usable quota windows"}\n\n${error ?? snapshot?.status}\n\nKeep OpenUsage running with its command-line helper installed, or use a compatible 0.7.x local API. Connect Claude or Codex there, then refresh. Monitoring controls remain available below.`}
+              markdown={`## ${error ? "Forecast unavailable" : "No usable quota windows"}\n\n${error ?? snapshot?.status}\n\nOpen OpenUsage and connect Claude or Codex, then refresh. OpenUsage 0.8+ uses its bundled helper; compatible older releases use the local API. Monitoring controls remain available below.`}
             />
           }
           actions={actions}
@@ -417,7 +422,7 @@ export default function Forecast() {
             accessories={[{ text: monitoringStatus }]}
             detail={
               <List.Item.Detail
-                markdown={`## Learn quietly in the background\n\n**Start Monitoring** to collect fresh quota readings. Opening this view only previews the forecast; it never saves samples or sends quota alerts.\n\nA new weekly model needs **3 readings spanning 6 hours**. A Session model needs **3 readings spanning 1 hour**, or one quarter of its window if shorter. These are elapsed hours, including idle time—not conversations or hours spent working.\n\nEligible previous cycles provide a provisional estimate while the current cycle learns. Allowance is an even-pace guideline; estimated pace is your modeled consumption rate.\n\nOnly sustained **weekly** risk or quota exhaustion triggers an alert. Raycast must stay running with background refresh enabled for **Monitor AI Quotas**; checks are approximately once a minute.\n\nFor banners, allow **Script Editor** in macOS Notifications. Focus and sleep can delay or hide them.${monitorError ? `\n\n**Last check failed:** ${monitorError}` : ""}`}
+                markdown={`## Background quota checks\n\n**Start Monitoring** to save fresh quota readings. Opening AI Forecast is read-only: it does not save samples or send quota alerts.\n\nA weekly model needs **3 readings spanning 6 hours**. A Session model needs **3 readings spanning 1 hour**, or a quarter of its window if shorter. This is elapsed time, including idle time. A Session is a quota window, not a conversation.\n\nPrevious eligible cycles provide a provisional estimate while the current cycle learns. Allowance spreads the remaining quota until reset; estimated pace models your consumption.\n\nAlerts cover sustained **weekly** risk and quota exhaustion. Keep Raycast running and enable background refresh for **Monitor AI Quotas**. Checks run roughly once a minute.\n\nAllow **Script Editor** in macOS Notifications to receive banners. Focus and sleep can delay or hide them.${monitorError ? `\n\n**Last check failed:** ${monitorError}` : ""}`}
                 metadata={
                   <List.Item.Detail.Metadata>
                     <List.Item.Detail.Metadata.Label

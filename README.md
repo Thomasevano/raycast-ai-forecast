@@ -4,24 +4,31 @@ A Raycast extension for Claude and Codex quota forecasts and quiet alerts, using
 
 ## Requirements and OpenUsage compatibility
 
-- macOS, [Raycast](https://www.raycast.com/), and [OpenUsage](https://github.com/robinebers/openusage/blob/v0.8.0/README.md#installation) with Claude and/or ChatGPT accounts configured. OpenUsage 0.8.0 requires macOS 15 or newer.
-- Python **3.12 or newer**, using only the standard library. Python 3.12 is the supported baseline; older versions may work but are unverified. For source development, Node.js **22.22.2 or newer** and npm are required by the locked Raycast SDK in [package-lock.json](package-lock.json).
+- The extension requires Raycast 2 on macOS Tahoe 26 or newer and Apple Silicon ([Raycast requirements](https://www.raycast.com/new)). Raycast 1 is not supported.
+- The standalone forecast engine requires macOS 15 or newer for native descriptor locking. This does not lower the extension's requirements. [OpenUsage 0.8.0](https://github.com/robinebers/openusage/blob/v0.8.0/Package.swift) also requires macOS 15; configure Claude and/or ChatGPT accounts in OpenUsage.
+- The installed extension runs its TypeScript engine inside Raycast. No separate Python installation is required. For source development and the manual history-assignment command, use Node.js 24 or newer and npm. CI verifies Node.js 24.
 
 ### OpenUsage 0.8.0: cached CLI
 
-Install OpenUsage using its [official instructions](https://github.com/robinebers/openusage/blob/v0.8.0/README.md#installation), configure your accounts, and keep the app running so it can fetch usage. In OpenUsage, choose **Settings → Advanced → Command Line → Install…**. This asks for an administrator password and links the helper at `/usr/local/bin/openusage`; app updates update the command as well ([OpenUsage 0.8.0 CLI documentation](https://github.com/robinebers/openusage/blob/v0.8.0/docs/cli.md)).
+Install OpenUsage using its [official instructions](https://github.com/robinebers/openusage/blob/v0.8.0/README.md#installation), configure your accounts, and keep the app running so it can fetch usage. **No administrator-installed CLI link is necessary.**
 
-AI Forecast runs the installed `openusage` CLI without arguments and reads its cached `openusage.limits.v2` JSON. It detects the command in `/usr/local/bin`, `/opt/homebrew/bin`, or absolute directories in `PATH`. If installed elsewhere, set the optional **OpenUsage helper override** in Raycast preferences to its trusted full path. Only select a program you trust: AI Forecast executes it.
+AI Forecast detects the bundled helper in `~/Applications/OpenUsage.app/Contents/Helpers`, then `/Applications/OpenUsage.app/Contents/Helpers`, before checking `/usr/local/bin`, `/opt/homebrew/bin`, and absolute directories in `PATH`. For a different location, set **OpenUsage helper override** in Raycast preferences to its trusted full path. Only select a program you trust; AI Forecast executes it. OpenUsage's optional **Settings → Advanced → Command Line → Install…** action remains available if you also want the `openusage` command in your terminal ([CLI documentation](https://github.com/robinebers/openusage/blob/v0.8.0/docs/cli.md)).
 
-The CLI does not refresh usage, sign in, read credentials, or launch OpenUsage. Exit code 4 with a valid empty envelope means nothing has been fetched yet: open OpenUsage and add or refresh an account. Each account has a separate ID and display name; AI Forecast uses only Claude and Codex weekly and session windows.
+The CLI does not refresh usage, sign in, read credentials, or launch OpenUsage. Exit code 4 with a valid empty envelope means nothing has been fetched yet. Open OpenUsage and add or refresh an account. Each account has a separate ID and display name; AI Forecast uses only Claude and Codex weekly and session windows.
 
-### Older OpenUsage: HTTP fallback
+The adapter first probes `--version`, which returns before account or credential handling in both reviewed releases. It runs the no-argument usage command only for OpenUsage 0.8 or newer, reading cached `openusage.limits.v2` JSON. The version result is cached in memory for an unchanged executable; replacement, modification, or a changed symlink target triggers another probe. An unidentified or failing helper is an error, not permission to try an unsafe usage command.
 
-If no CLI is installed, AI Forecast falls back to `GET http://127.0.0.1:6736/v1/limits`, accepting the `openusage.limits.v1` schema documented for [OpenUsage 0.7.16](https://github.com/robinebers/openusage/blob/v0.7.16/docs/local-http-api.md). Its local server starts with the app but is disabled for that session if port 6736 is occupied. The API also serves cached snapshots. A CLI that is present but fails does **not** trigger HTTP fallback. Do not downgrade OpenUsage solely for this extension without considering the security and maintenance trade-offs.
+An executable changed during its version probe is rejected before usage. File-identity checks are not atomic with process execution: use only trusted helper paths, and pause monitoring before replacing or downgrading OpenUsage.
 
-The extension searches for executable `python3` in `/opt/homebrew/bin`, `/usr/local/bin`, the Command Line Tools directory, then absolute directories in its `PATH`. It deliberately skips the `/usr/bin/python3` system installer stub during detection. It selects the first executable found, without checking its version; Command Line Tools may provide an older Python. If the selected interpreter is too old or your installation is elsewhere, set **Python executable override** in extension preferences to the full path of a suitable interpreter. We recommend a current Python installed with `brew install python` using [Homebrew](https://docs.brew.sh/Homebrew-and-Python).
+### Older OpenUsage: cached HTTP
 
-The tested forecast engine remains in Python for continuity and its `flock`-based state coordination. A TypeScript rewrite could remove the separate Python runtime, but is not required by the Raycast Store and would not by itself change the Script Editor attribution of AppleScript notifications.
+With a recognized pre-0.8 helper, or with no helper, AI Forecast uses `GET http://127.0.0.1:6736/v1/limits`. It accepts the `openusage.limits.v1` schema documented for [OpenUsage 0.7.16](https://github.com/robinebers/openusage/blob/v0.7.16/docs/local-http-api.md), including both bare default-card IDs and `claude@…` / `codex@…` IDs. Recognized old helpers are used only for the metadata probe; quota reads use HTTP because their usage command can refresh data and read credentials.
+
+The local API also serves cached snapshots. Its server starts with OpenUsage but is disabled for that session if port 6736 is occupied. A modern CLI that fails does **not** trigger HTTP fallback. Other older releases are compatible only if they expose this cached HTTP contract; they have not been individually verified. Do not downgrade OpenUsage solely for this extension without considering the security and maintenance trade-offs.
+
+The TypeScript engine uses the standard macOS `/usr/bin/lockf` utility for BSD `flock` coordination. This preserves the existing history lock without a native npm dependency. It does not change the forecast rules or the Script Editor attribution of AppleScript notifications.
+
+See the [source-backed compatibility assessment](docs/openusage-compatibility.md) for version boundaries, the macOS requirement, and isolated verification limits.
 
 ## Install from source
 
@@ -47,7 +54,7 @@ Raycast schedules the monitor approximately once a minute, not on an exact timer
 ## Forecast and alerts
 
 - **Allowance** spreads your remaining quota evenly until its scheduled reset: weekly quota points per day, or Session quota points per hour. **1 point is 1% of the full corresponding quota**, not 1% of what remains. A day means 24 elapsed hours, not a working day. With less than one day/hour left, the view shows the remaining points instead of an inflated normalized allowance. Values are approximate, not guaranteed spending ceilings.
-- **Estimated pace** is a model of how quickly you consume that quota. Monitoring—not opening the view—builds its history from distinct fresh OpenUsage readings. It measures elapsed calendar time, including idle time; it does not count messages, conversations, or working sessions.
+- **Estimated pace** models how quickly you consume that quota. Monitoring builds its history from distinct fresh OpenUsage readings; opening the view does not. It measures elapsed calendar time, including idle time; it does not count messages, conversations, or working sessions.
 - A new weekly model needs **three readings spanning six hours**. A Session model needs **three readings spanning one hour**, or a quarter of its quota window if shorter. A Session is a provider's short-term quota window, not a conversation.
 - Once ready, the current-cycle pace is half the cycle-average rate and half the observed change over up to the last 24 hours. Up to **four eligible previous cycles** are retained for the same account, quota type, plan and window length. Their observed rates provide a **provisional** estimate during learning; afterwards the estimate is 75% current-cycle pace and 25% historical mean. No unobserved cycle-end totals are invented.
 - A forecast alert requires a ready **weekly** model, a projected overshoot of at least five quota points and exhaustion at least six hours early, sustained for 30 minutes across three distinct fresh readings. A historical-only estimate cannot trigger it; Session projections do not add a new risk-alert category.
@@ -56,6 +63,8 @@ Raycast schedules the monitor approximately once a minute, not on an exact timer
 - Real reset boundaries can archive sufficiently observed rates. Counter drops recalibrate the current curve; changed or missing plan/window metadata prevents incompatible history from being mixed. Failed notification dispatch does not consume the alert.
 
 There is no notification merely because the forecast was opened, or for every percentage change.
+
+Optional [Warning/Critical thresholds](https://github.com/Thomasevano/raycast-ai-forecast/issues/2) and a [Use It or Lose It reminder](https://github.com/Thomasevano/raycast-ai-forecast/issues/3) are deferred proposals, not implemented alert categories. See the [native-alert assessment](docs/native-alerts.md) for the distinction between OpenUsage's policies and this extension's.
 
 ## macOS notifications
 
@@ -66,7 +75,7 @@ Quota alerts and the test action use `/usr/bin/osascript` to submit AppleScript 
 **Community reset signals** is enabled by default and can be disabled in extension preferences. With a Codex account present, opening or refreshing the view may request these public HTTPS endpoints independently, with bounded timeouts. Normalized public readings are cached in Raycast for at least one minute per source, including across view reopenings; HTTP 429 `Retry-After` delays are honored.
 
 - [`codex-reset.com/api/forecast`](https://codex-reset.com/api/forecast): experimental **global-reset display estimates** for 24 and 48 hours, both visible directly in the list. AI Forecast passes through the [documented](https://codex-reset.com/developers) `probabilities.rounded_24h` and `rounded_48h` fields. The source uses historical reset frequency and can apply caps or floors for public hints and commitments; these display values are not calibrated probabilities. Its [method page](https://codex-reset.com/forecast-method) now mainly describes the homepage's separate combined global-reset-or-new-banked-grant outlook, not an exact formula for these global-only API fields. A banked grant does not refill personal quota until redeemed.
-- [`www.willcodexquotareset.com/api/forecast`](https://www.willcodexquotareset.com/api/forecast): an **uncalibrated signal score out of 100**, for 48 hours only—not a probability, a statistical confidence level, or a 24-hour forecast. Its [published explanation](https://www.willcodexquotareset.com/) describes baseline points adjusted for incidents, team posts, launch signals and a recent-reset cooldown, with softer evidence fading and repeated hints counted once. AI Forecast displays `forecast.score` unchanged as `/100`, not `%`; the public JSON provides the source's point breakdown.
+- [`www.willcodexquotareset.com/api/forecast`](https://www.willcodexquotareset.com/api/forecast): an **uncalibrated signal score out of 100**, for 48 hours only. It is not a probability, a statistical confidence level, or a 24-hour forecast. Its [published explanation](https://www.willcodexquotareset.com/) describes baseline points adjusted for incidents, team posts, launch signals and a recent-reset cooldown, with softer evidence fading and repeated hints counted once. AI Forecast displays `forecast.score` unchanged as `/100`, not `%`; the public JSON provides the source's point breakdown.
 
 These sites watch for exceptional public Codex reset events. Your **scheduled account reset** comes from OpenUsage and remains the only reset used in the allowance calculation. The sites share signals and are **not independent evidence**: their numbers are shown separately, never averaged, and never enter the allowance, pace model or alerts. Malformed, future-dated or over-one-hour-old data is unavailable; one failed source does not hide the other or your local forecast. The background monitor never contacts either site.
 
@@ -82,14 +91,18 @@ AI Forecast stores account IDs, bounded usage samples, window metadata, plan fin
 
 ### Migrating version 1 history
 
-Version 1 numeric samples and notification deduplication state are adopted for a unique account of the same provider kind. When multiple accounts of that kind exist, migration fails closed rather than guessing. The current state records an explicit account binding, which persists when accounts disappear; later v1 input reuses that binding.
+When moving to a v2 snapshot, unqualified family-only legacy history and notification deduplication state are adopted for a unique account of the same provider kind. When multiple accounts of that kind exist, migration fails closed rather than guessing. The current state records an explicit account binding that persists when accounts disappear. Family-only v1 input reuses it unless durable account-aware v1 routing has been established.
 
-State version 3 preserves earlier account bindings and exhaustion/risk flags. Older numeric samples lack trustworthy plan/window provenance: they are retained separately, not used as input to the new pace profile, which must learn once from fresh readings. The earlier numeric history is retained; no historical weeks are invented.
+Account-aware v1 HTTP snapshots keep bare default cards and named cards separate by default: `codex` is not an automatic alias for `codex@…`. This routing survives the disappearance of the last named card and a restart. Identified v1 cards are not automatically moved into new v2 IDs either; the old record is retained and a new ID learns its own pace. Explicit history assignments remain owner-controlled and collision-checked. In a downgrade, v1 cards do not overwrite an existing v2 account binding.
 
-To resolve an **Ambiguous legacy history** error, use the exact account ID from your trusted local OpenUsage CLI output and bind the old history explicitly. Stop monitoring first and use your actual absolute paths and account ID in this example:
+State version 3 preserves earlier account bindings and exhaustion/risk flags. Older numeric samples lack trustworthy plan/window provenance. They are retained separately, not used as input to the new pace profile, which must learn once from fresh readings. No historical weeks are invented.
+
+The Python-to-TypeScript upgrade reads the same state file and versions 1–3 directly; it needs no export, history reset or one-time conversion command. The explicit assignment below is only for ambiguous legacy accounts.
+
+To resolve an **Ambiguous legacy history** error, use the exact account ID from your trusted **OpenUsage 0.8 or newer** helper output and bind the old history explicitly. Stop monitoring first. From this repository's directory, after installing its source requirements, use your actual account ID. Replace the bundled helper path below if your app is installed elsewhere; do not use an older CLI's usage command:
 
 ```sh
-openusage | python3 /absolute/path/to/raycast-ai-forecast/assets/openusage-model.py \
+"/Applications/OpenUsage.app/Contents/Helpers/openusage" | npm run migrate-history -- \
   --state-dir "$HOME/Library/Application Support/AI Forecast" \
   --assign-legacy 'claude=claude@ACCOUNT_ID'
 ```
@@ -116,4 +129,4 @@ npm run lint
 npm run bundle
 ```
 
-The Python suite covers forecast math, freshness, resets, out-of-order data, notification deduplication and failures, permissions, corrupt state, and preview isolation. A build or test suite alone does not verify Raycast's native window, background scheduler, or Notification Center presentation.
+The Node suite covers forecast math, freshness, resets, account migration, notification retries, concurrent monitors, native lock interoperability, permissions, corruption, read-only preview, and isolated CLI/HTTP adapters. Compatibility regressions cover legacy default/named cards, persistent routing when cards disappear, executable replacement between reads or during probing, unsafe legacy-command avoidance and unidentified-helper failures. Fixtures use temporary history and injected notification delivery; no real account or notification is needed. A build or test suite alone does not verify Raycast's native window, background scheduler, or Notification Center presentation.

@@ -7,9 +7,10 @@ import {
   Toast,
 } from "@raycast/api";
 import { readForecast } from "./quota";
+import { monitoringEnabled } from "./monitoring-state";
 
 export default async function Monitor(): Promise<void> {
-  const enabled = await LocalStorage.getItem<boolean>("monitoring");
+  const enabled = monitoringEnabled(await LocalStorage.getItem("monitoring"));
   if (!enabled) {
     if (environment.launchType === LaunchType.UserInitiated) {
       await showToast({
@@ -20,15 +21,12 @@ export default async function Monitor(): Promise<void> {
     }
     return;
   }
-  const { pythonPath, openusagePath } = getPreferenceValues<{
-    pythonPath?: string;
+  const { openusagePath } = getPreferenceValues<{
     openusagePath?: string;
   }>();
   try {
     const snapshot = await readForecast({
-      pythonPath,
       openusagePath,
-      assetsPath: environment.assetsPath,
       preview: false,
     });
     await LocalStorage.setItem("lastMonitorAt", Date.now());
